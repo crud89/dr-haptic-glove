@@ -1,8 +1,6 @@
 ﻿using System;
 using System.Threading.Tasks;
 using InTheHand.Bluetooth;
-using Windows.Devices.Input;
-using Windows.Security.Authentication.OnlineId;
 
 var package = new HapticGlovePackage();
 package.MotorData.Add(new HapticGloveMotorData());
