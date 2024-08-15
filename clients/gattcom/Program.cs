@@ -3,8 +3,7 @@ using System.Threading.Tasks;
 using InTheHand.Bluetooth;
 
 var package = new HapticGlovePackage();
-package.MotorData.Add(new HapticGloveMotorData());
-package.MotorData.Add(new HapticGloveMotorData());
+package.MotorData.AddRange(Enumerable.Repeat(default(HapticGloveMotorData), 12));
 
 Console.Write("Looking for devices");
 BluetoothDevice? gloveDevice = null;
@@ -71,8 +70,8 @@ try
     while (!Console.KeyAvailable || Console.ReadKey(true).Key != ConsoleKey.Escape)
     {
         // Update packages.
-        package.MotorData[0] = new HapticGloveMotorData() { MotorIndex = 1, Strength = Convert.ToByte(rng.Next(0, 255)), Duration = Convert.ToUInt16(rng.Next(0, 3000)) };
-        package.MotorData[1] = new HapticGloveMotorData() { MotorIndex = 0, Strength = Convert.ToByte(rng.Next(0, 255)), Duration = Convert.ToUInt16(rng.Next(0, 3000)) };
+        package.MotorData[0] = new HapticGloveMotorData() { MotorIndex = Convert.ToByte(rng.Next(3, 8)), Strength = Convert.ToByte(rng.Next(0, 128)), Duration = Convert.ToUInt16(rng.Next(0, 3000)) };
+        package.MotorData[1] = new HapticGloveMotorData() { MotorIndex = Convert.ToByte(rng.Next(3, 8)), Strength = Convert.ToByte(rng.Next(0, 128)), Duration = Convert.ToUInt16(rng.Next(0, 3000)) };
 
         // Set updates.
         Console.Write("Sending package...");
