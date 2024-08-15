@@ -1,7 +1,7 @@
 #define USE_BINARY_INTERFACE 1          // Set to 0 to use text-based interface for serial command line.
 #define TEXT_INTERFACE_BUFFER_SIZE 255  // Buffer size to parse text interface buffers.
-#define WRITE_DEBUG_OUTPUT 1            // Set to 0 to disable writing debug to bus.
-#define CONNECTED_MOTORS 2              // Set to 12 for full set of motors.
+#define WRITE_DEBUG_OUTPUT 0            // Set to 0 to disable writing debug to bus.
+#define CONNECTED_MOTORS 12             // Set to 12 for full set of motors.
 #define USE_BLUETOOTH_LOW_ENERGY 1      // Set to 1 to support establishing wireless BLE connections.
 
 /*
@@ -38,7 +38,16 @@ BLEService hapticGloveService(hapticGloveServiceId);
 // Setup the global variables for vibration strength and duration
 int vibrationStrength[] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
 int vibrationDuration[] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
-int motorPinMap[]       = { 5, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+
+// Motor Controller
+#include <Wire.h>
+#include <Adafruit_PWMServoDriver.h>
+
+// NOTE: This value is specific for each individual PCA9685, so for best results it needs to be measured and calibrated.
+//       See: https://github.com/adafruit/Adafruit-PWM-Servo-Driver-Library/blob/73cf3ecc79c7c33a72f8ce1a3d91ca556cd34ab3/examples/servo/servo.ino#L48C1-L63C6
+const uint32_t motorControllerClock = 25000000;
+const float motorControllerServoFrequency = 50.f;
+Adafruit_PWMServoDriver motorController = Adafruit_PWMServoDriver(0x40, Wire);
 
 // Time stamp of last iteration.
 unsigned long lastTimeStamp = millis();
@@ -244,6 +253,19 @@ void onBluetoothDataWritten(BLEDevice central, BLECharacteristic characteristic)
 }
 #endif // USE_BLUETOOTH_LOW_ENERGY
 
+void signalInitError()
+{
+  // Flash builtin LED.
+  unsigned long startTime = millis();
+  unsigned long timeStamp;
+
+  while(1) 
+  {
+    timeStamp = millis() - startTime;
+    digitalWrite(LED_BUILTIN, sin(timeStamp / 157) > 0.0 ? HIGH : LOW);
+  }
+}
+
 void setup()
 {
   // Turn on builtin LED to indicate loading.
@@ -254,18 +276,22 @@ void setup()
   // Initialize bus at a 9600 Hz baud rate.
   Serial.begin(9600);
 
-  // Set pins for prototype vibration motors and disable them initially.
-  pinMode(5, OUTPUT);
-  pinMode(6, OUTPUT);
-  analogWrite(5, 0);
-  analogWrite(6, 0);
+  // Setup motor controller.
+  if (!motorController.begin())
+  {
+    Serial.println("Unable to start motor controller.");
+    signalInitError();
+  }
+
+  motorController.setOscillatorFrequency(motorControllerClock);
+  motorController.setPWMFreq(motorControllerServoFrequency);
 
 #if USE_BLUETOOTH_LOW_ENERGY
   // Start Bluetooth service.
   if (!BLE.begin())
   {
     Serial.println("Unable to start BLE module");
-    while(1);
+    signalInitError();
   }
 
   // Initialize and advertise the service.
@@ -293,6 +319,7 @@ void setup()
 
 void loop()
 {
+
 #if USE_BLUETOOTH_LOW_ENERGY
   BLE.poll();
 #endif // USE_BLUETOOTH_LOW_ENERGY
@@ -313,7 +340,7 @@ void loop()
   digitalWrite(LED_BUILTIN, LOW);
 
 #if WRITE_DEBUG_OUTPUT
-  /*
+/*
   // Print debug output for motor strength and remaining duration.
   for (int i = 0; i < CONNECTED_MOTORS; ++i)
   {
@@ -327,16 +354,16 @@ void loop()
       Serial.println(vibrationDuration[i]);
     }
   }
-  */
+*/
 #endif
 
   // Set motor intensities.
   for (int i = 0; i < CONNECTED_MOTORS; ++i)
   {
     if (vibrationDuration[i] > 0)
-      analogWrite(motorPinMap[i], vibrationStrength[0]);
+      motorController.setPin(i, vibrationStrength[i] * 16); // Scale up to 12 bit domain.
     else
-      analogWrite(motorPinMap[i], 0);
+      motorController.setPin(i, 0);
   }
 
   // Update time stamps.
