@@ -1,8 +1,14 @@
 #define USE_BINARY_INTERFACE 1          // Set to 0 to use text-based interface for serial command line.
 #define TEXT_INTERFACE_BUFFER_SIZE 255  // Buffer size to parse text interface buffers.
 #define WRITE_DEBUG_OUTPUT 0            // Set to 0 to disable writing debug to bus.
-#define CONNECTED_MOTORS 12             // Set to 12 for full set of motors.
+#define CONNECTED_MOTORS 16             // Set to 12 for full set of motors.
 #define USE_BLUETOOTH_LOW_ENERGY 1      // Set to 1 to support establishing wireless BLE connections.
+
+#if defined(RGB_BUILTIN)
+#define HAS_BUILTIN_RGB_LED
+#elif defined(LEDR) && defined(LEDG) && defined(LEDB)
+#define HAS_COLORED_LEDS
+#endif
 
 /*
  * Input formats:
@@ -27,17 +33,17 @@ const char* hapticGloveRightHandId = "141806C2-081D-4197-0001-98D46AC994BE";
 #if USE_BINARY_INTERFACE
 BLECharacteristic hapticGloveRightHand(hapticGloveRightHandId, BLEWrite | BLEIndicate, CONNECTED_MOTORS * 4 + 4, false);
 //BLECharacteristic hapticGloveLeftHand(hapticGloveLeftHandId, BLEWrite | BLEIndicate, CONNECTED_MOTORS * 4 + 4, false);
-#else // USE_BINARY_INTERFACE
+#else   // USE_BINARY_INTERFACE
 BLEStringCharacteristic hapticGloveRightHand(hapticGloveRightHandId, BLEWrite | BLEIndicate, TEXT_INTERFACE_BUFFER_SIZE);
 //BLEStringCharacteristic hapticGloveLeftHand(hapticGloveLeftHandId, BLEWrite | BLEIndicate, TEXT_INTERFACE_BUFFER_SIZE);
-#endif // USE_BINARY_INTERFACE
+#endif  // USE_BINARY_INTERFACE
 
-BLEService hapticGloveService(hapticGloveServiceId); 
-#endif // USE_BLUETOOTH_LOW_ENERGY
+BLEService hapticGloveService(hapticGloveServiceId);
+#endif  // USE_BLUETOOTH_LOW_ENERGY
 
 // Setup the global variables for vibration strength and duration
-int vibrationStrength[] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
-int vibrationDuration[] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+int vibrationStrength[] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+int vibrationDuration[] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
 
 // Motor Controller
 #include <Wire.h>
@@ -53,8 +59,7 @@ Adafruit_PWMServoDriver motorController = Adafruit_PWMServoDriver(0x40, Wire);
 unsigned long lastTimeStamp = millis();
 
 #if USE_BINARY_INTERFACE
-void parseInput(uint32_t motorsInPackage, const uint32_t* inputBuffer)
-{
+void parseInput(uint32_t motorsInPackage, const uint32_t* inputBuffer) {
 #if WRITE_DEBUG_OUTPUT
   Serial.print("Received package with ");
   Serial.print(motorsInPackage);
@@ -62,20 +67,19 @@ void parseInput(uint32_t motorsInPackage, const uint32_t* inputBuffer)
 #endif
 
   // Package has been fully read. Now parse the values.
-  for (int i = 0; i < motorsInPackage; ++i) 
-  {
+  for (int i = 0; i < motorsInPackage; ++i) {
     // Parse by masking out the individual components.
     uint32_t motorIndex = (0xFF000000 & inputBuffer[i]) >> 24u;
-    uint32_t strength   = (0x00FF0000 & inputBuffer[i]) >> 16u;
-    uint32_t duration   = (0x0000FFFF & inputBuffer[i]);
+    uint32_t strength = (0x00FF0000 & inputBuffer[i]) >> 16u;
+    uint32_t duration = (0x0000FFFF & inputBuffer[i]);
 
 #if WRITE_DEBUG_OUTPUT
-  Serial.print("Motor ");
-  Serial.print(motorIndex);
-  Serial.print(": Strength = ");
-  Serial.print(strength);
-  Serial.print(", Duration = ");
-  Serial.println(duration);
+    Serial.print("Motor ");
+    Serial.print(motorIndex);
+    Serial.print(": Strength = ");
+    Serial.print(strength);
+    Serial.print(", Duration = ");
+    Serial.println(duration);
 #endif
 
     // Ignore invalid motor indices.
@@ -87,16 +91,14 @@ void parseInput(uint32_t motorsInPackage, const uint32_t* inputBuffer)
   }
 }
 
-inline void readSerialInputAsync()
-{
+inline void readSerialInputAsync() {
   // Define input buffer. The maximum size is defined by the number of connected motors.
   static uint32_t motorsInPackage = 0;
   static uint32_t inputBuffer[CONNECTED_MOTORS];
   static int lastMotorRead = 0;
 
   // If no package is currently read, start by reading the number of motors in the package.
-  if (motorsInPackage == 0)
-  {
+  if (motorsInPackage == 0) {
     // If there are less than 4 bytes available, don't read anything yet.
     if (Serial.available() < 4)
       return;
@@ -105,26 +107,24 @@ inline void readSerialInputAsync()
   }
 
   // Read until either the buffer is full or there is a newline detected.
-  for (lastMotorRead; lastMotorRead < motorsInPackage; ++lastMotorRead)
-  {
+  for (lastMotorRead; lastMotorRead < motorsInPackage; ++lastMotorRead) {
     // Same as above. If there are less than 4 bytes available, wait for the buffer to fill with the next iteration.
     if (Serial.available() < 4)
       return;
-     
+
     Serial.readBytes(reinterpret_cast<char*>(&inputBuffer[lastMotorRead]), 4u);
   }
 
   // Parse the input.
   parseInput(motorsInPackage, inputBuffer);
-  
+
   // Reset input buffer for new readings.
   memset(inputBuffer, 0u, CONNECTED_MOTORS);
   lastMotorRead = 0;
   motorsInPackage = 0;
 }
-#else // USE_BINARY_INTERFACE
-void parseInput(char* inputBuffer)
-{
+#else  // USE_BINARY_INTERFACE
+void parseInput(char* inputBuffer) {
 #if WRITE_DEBUG_OUTPUT
   Serial.print("Received text input: ");
   Serial.println(inputBuffer);
@@ -132,9 +132,8 @@ void parseInput(char* inputBuffer)
 
   // Parse the line.
   char* token = strtok(inputBuffer, " ");
-  
-  for (int i = 0; i < CONNECTED_MOTORS; ++i) 
-  {
+
+  for (int i = 0; i < CONNECTED_MOTORS; ++i) {
     // Clamp the strength to a range [0..255].
     if (token == NULL)
       break;
@@ -151,17 +150,14 @@ void parseInput(char* inputBuffer)
   }
 }
 
-inline void readSerialInputAsync()
-{
+inline void readSerialInputAsync() {
   // Define input buffer.
   static char inputBuffer[TEXT_INTERFACE_BUFFER_SIZE];
   static int lastReadPos = 0;
 
   // Read until either the buffer is full or there is a newline detected.
-  for (lastReadPos; lastReadPos < TEXT_INTERFACE_BUFFER_SIZE; ++lastReadPos)
-  {
-    if (Serial.available() > 0)
-    {
+  for (lastReadPos; lastReadPos < TEXT_INTERFACE_BUFFER_SIZE; ++lastReadPos) {
+    if (Serial.available() > 0) {
       char input = Serial.read();
 
       // No need to attach the delimiter, only parse the input.
@@ -169,9 +165,7 @@ inline void readSerialInputAsync()
         break;
       else
         inputBuffer[lastReadPos] = input;
-    }
-    else
-    {
+    } else {
       // Return in order to continue loop, but maybe come back later if there's more data available.
       return;
     }
@@ -184,31 +178,43 @@ inline void readSerialInputAsync()
   memset(inputBuffer, '\0', TEXT_INTERFACE_BUFFER_SIZE);
   lastReadPos = 0;
 }
-#endif // USE_BINARY_INTERFACE
+#endif  // USE_BINARY_INTERFACE
 
 #if USE_BLUETOOTH_LOW_ENERGY
-void onBluetoothDeviceConnected(BLEDevice central) 
-{
+void onBluetoothDeviceConnected(BLEDevice central) {
 #if WRITE_DEBUG_OUTPUT
   Serial.print("Connected to device: ");
   Serial.println(central.address());
 #endif
+
+#if defined(HAS_BUILTIN_RGB_LED)
+  neopixelWrite(RGB_BUILTIN, 0, 0, 50);
+#elif defined(HAS_COLORED_LEDS)
+  digitalWrite(LEDR, HIGH);
+  digitalWrite(LEDG, HIGH);
+  digitalWrite(LEDB, LOW);
+#endif
 }
 
-void onBluetoothDeviceDisconnected(BLEDevice central) 
-{
+void onBluetoothDeviceDisconnected(BLEDevice central) {
 #if WRITE_DEBUG_OUTPUT
   Serial.print("Disconnected from device: ");
   Serial.println(central.address());
 #endif
+
+#if defined(HAS_BUILTIN_RGB_LED)
+  neopixelWrite(RGB_BUILTIN, 0, 0, 0);
+#elif defined(HAS_COLORED_LEDS)
+  digitalWrite(LEDR, HIGH);
+  digitalWrite(LEDG, HIGH);
+  digitalWrite(LEDB, HIGH);
+#endif
 }
 
-void onBluetoothDataWritten(BLEDevice central, BLECharacteristic characteristic)
-{
+void onBluetoothDataWritten(BLEDevice central, BLECharacteristic characteristic) {
 #if USE_BINARY_INTERFACE
   // Ignore everything below 4 bytes and everything not a multiple of 4 bytes.
-  if (characteristic.valueLength() < 4 || (characteristic.valueLength() % 4) != 0)
-  {
+  if (characteristic.valueLength() < 4 || (characteristic.valueLength() % 4) != 0) {
 #if WRITE_DEBUG_OUTPUT
     Serial.print("Received invalid package. Size was ");
     Serial.print(characteristic.valueLength());
@@ -223,14 +229,13 @@ void onBluetoothDataWritten(BLEDevice central, BLECharacteristic characteristic)
 
   const uint32_t* inputBuffer = reinterpret_cast<const uint32_t*>(characteristic.value());
   const uint32_t motorsInPackage = inputBuffer[0];
-  inputBuffer++; // Skip counter variable.
+  inputBuffer++;  // Skip counter variable.
 
   // Parse the input.
   parseInput(motorsInPackage, inputBuffer);
-#else // USE_BINARY_INTERFACE
+#else  // USE_BINARY_INTERFACE
   // Ignore packages that are too large.
-  if (characteristic.valueLength() >= TEXT_INTERFACE_BUFFER_SIZE)
-  {
+  if (characteristic.valueLength() >= TEXT_INTERFACE_BUFFER_SIZE) {
 #if WRITE_DEBUG_OUTPUT
     Serial.print("Received invalid package. Size was ");
     Serial.print(characteristic.valueLength());
@@ -242,45 +247,65 @@ void onBluetoothDataWritten(BLEDevice central, BLECharacteristic characteristic)
 
   // Enable LED.
   digitalWrite(LED_BUILTIN, HIGH);
-    
+
   // Read the package.
   char* inputBuffer = strdup(reinterpret_cast<const char*>(characteristic.value()));
 
   // Parse text input and release the buffer.
   parseInput(inputBuffer);
   free(inputBuffer);
-#endif // USE_BINARY_INTERFACE
+#endif  // USE_BINARY_INTERFACE
 }
-#endif // USE_BLUETOOTH_LOW_ENERGY
+#endif  // USE_BLUETOOTH_LOW_ENERGY
 
-void signalInitError()
-{
+void signalInitError() {
   // Flash builtin LED.
   unsigned long startTime = millis();
   unsigned long timeStamp;
 
-  while(1) 
-  {
+  while (1) {
     timeStamp = millis() - startTime;
     digitalWrite(LED_BUILTIN, sin(timeStamp / 157) > 0.0 ? HIGH : LOW);
   }
 }
 
-void setup()
-{
+void setup() {
   // Turn on builtin LED to indicate loading.
   // NOTE: If the LED stays turned on, there's an error duing setup.
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, HIGH);
 
+  // Initialize additional status LEDs, if supported.
+#if defined(HAS_COLORED_LEDS)
+  // NOTE: Instead of using digitalWrite, it is possible to use analogWrite (255 is OFF, 0 is fully ON) to mix colors.
+  pinMode(LEDR, OUTPUT);
+  pinMode(LEDG, OUTPUT);
+  pinMode(LEDB, OUTPUT);
+  digitalWrite(LEDR, HIGH);
+  digitalWrite(LEDG, HIGH);
+  digitalWrite(LEDB, HIGH);
+#endif
+
   // Initialize bus at a 9600 Hz baud rate.
   Serial.begin(9600);
 
   // Setup motor controller.
-  if (!motorController.begin())
-  {
+  if (!motorController.begin()) {
     Serial.println("Unable to start motor controller.");
+    Serial.flush();
+
+#if defined(HAS_BUILTIN_RGB_LED)
+  neopixelWrite(RGB_BUILTIN, 50, 0, 50);
+#elif defined(HAS_COLORED_LEDS)
+    digitalWrite(LEDR, LOW);
+    digitalWrite(LEDG, HIGH);
+    digitalWrite(LEDB, LOW);
+#endif
+
     signalInitError();
+  } else {
+    Serial.println("Motor controller started.");
+    Serial.flush();
   }
 
   motorController.setOscillatorFrequency(motorControllerClock);
@@ -288,10 +313,22 @@ void setup()
 
 #if USE_BLUETOOTH_LOW_ENERGY
   // Start Bluetooth service.
-  if (!BLE.begin())
-  {
+  if (!BLE.begin()) {
     Serial.println("Unable to start BLE module");
+    Serial.flush();
+
+#if defined(HAS_BUILTIN_RGB_LED)
+  neopixelWrite(RGB_BUILTIN, 0, 0, 50);
+#elif defined(HAS_COLORED_LEDS)
+    digitalWrite(LEDR, HIGH);
+    digitalWrite(LEDG, HIGH);
+    digitalWrite(LEDB, LOW);
+#endif
+
     signalInitError();
+  } else {
+    Serial.println("BLE module started.");
+    Serial.flush();
   }
 
   // Initialize and advertise the service.
@@ -304,9 +341,9 @@ void setup()
   // Setup advertisement.
   BLE.setAdvertisedService(hapticGloveService);
   BLE.setAdvertisingInterval(80);
-  BLE.setAppearance(0x03C0); // Generic Human Interface Device (HID).
+  BLE.setAppearance(0x03C0);  // Generic Human Interface Device (HID).
   BLE.advertise();
-  
+
   // Assign event handlers.
   BLE.setEventHandler(BLEConnected, onBluetoothDeviceConnected);
   BLE.setEventHandler(BLEDisconnected, onBluetoothDeviceDisconnected);
@@ -317,25 +354,17 @@ void setup()
   digitalWrite(LED_BUILTIN, LOW);
 }
 
-void loop()
-{
-
+void loop() {
 #if USE_BLUETOOTH_LOW_ENERGY
   BLE.poll();
-#endif // USE_BLUETOOTH_LOW_ENERGY
+#endif  // USE_BLUETOOTH_LOW_ENERGY
 
-  if (Serial.available() > 0)
-  {
+  if (Serial.available() > 0) {
     // Enable LED.
     digitalWrite(LED_BUILTIN, HIGH);
-
-#if USE_BINARY_INTERFACE
     readSerialInputAsync();
-#else
-    readSerialInputAsync();
-#endif
   }
-  
+
   // Disable LED.
   digitalWrite(LED_BUILTIN, LOW);
 
@@ -358,10 +387,9 @@ void loop()
 #endif
 
   // Set motor intensities.
-  for (int i = 0; i < CONNECTED_MOTORS; ++i)
-  {
+  for (int i = 0; i < CONNECTED_MOTORS; ++i) {
     if (vibrationDuration[i] > 0)
-      motorController.setPin(i, vibrationStrength[i] * 16); // Scale up to 12 bit domain.
+      motorController.setPin(i, vibrationStrength[i] * 16);  // Scale up to 12 bit domain.
     else
       motorController.setPin(i, 0);
   }
@@ -370,10 +398,9 @@ void loop()
   unsigned long currentTimeStamp = millis();
   unsigned long deltaTime = currentTimeStamp - lastTimeStamp;
   lastTimeStamp = currentTimeStamp;
-  
+
   // Set motor intensities.
-  for (int i = 0; i < CONNECTED_MOTORS; ++i)
-  {
+  for (int i = 0; i < CONNECTED_MOTORS; ++i) {
     if (vibrationDuration[i] > 0)
       vibrationDuration[i] -= deltaTime;
   }
