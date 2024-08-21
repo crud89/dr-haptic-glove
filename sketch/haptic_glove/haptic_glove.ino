@@ -10,6 +10,8 @@
 #define HAS_COLORED_LEDS
 #endif
 
+// ----------------------------------------------------- Bluetooth Low Energy (BLE) -----------------------------------------------------
+
 /*
  * Input formats:
  * ASCII/Text: "strength duration strength duration ..." with implicit indexing. Use '\n' to end a line.
@@ -39,7 +41,112 @@ BLEStringCharacteristic hapticGloveRightHand(hapticGloveRightHandId, BLEWrite | 
 #endif  // USE_BINARY_INTERFACE
 
 BLEService hapticGloveService(hapticGloveServiceId);
+
+// Provide a battery service, if available.
+#if defined(ARDUINO_ADAFRUIT_FEATHER_ESP32S3)
+#define PROVIDE_BATTERY_SERVICE
+BLEUnsignedCharCharacteristic hapticGloveBatteryLevel("2A19", BLERead | BLENotify);
+BLEService hapticGloveBatteryService("180F");
+#endif  // ARDUINO_ADAFRUIT_FEATHER_ESP32S3
 #endif  // USE_BLUETOOTH_LOW_ENERGY
+
+// --------------------------------------------------------- Battery Management ----------------------------------------------------------
+
+#if defined(ARDUINO_ADAFRUIT_FEATHER_ESP32S3)
+// Older revisions use the LC709203 battery monitor. If your board has does not have "MAX17048" written on it's back, it uses the older
+// monitor. In this case, simply comment out this define.
+// See: https://learn.adafruit.com/adafruit-esp32-s3-feather/pinouts#lc709203-battery-monitor-3121497
+#define HAS_MAX17048_MONITOR
+
+#ifdef HAS_MAX17048_MONITOR
+#include <Adafruit_MAX1704X.h>
+#else  // HAS_MAX17048_MONITOR
+#include <Adafruit_LC709203F.h>
+#endif  // HAS_MAX17048_MONITOR
+
+#include <TimerEvent.h>
+
+struct BatteryState {
+  float voltage = 0.0f;
+  float percentage = 0.0f;
+};
+
+void queryBatteryState();
+
+class BatteryMonitor {
+public:
+  friend void queryBatteryState();
+
+private:
+#ifdef HAS_MAX17048_MONITOR
+  Adafruit_MAX17048 m_batteryMonitor;
+#else   // HAS_MAX17048_MONITOR
+  Adafruit_LC709203F m_batteryMonitor;
+#endif  // HAS_MAX17048_MONITOR
+  TimerEvent m_queryBatteryMonitorTimer;
+  BatteryState m_currentBatteryState;
+  bool m_hasUpdate = false;
+
+  // TODO: Make those virtual to support different implementations.
+public:
+  inline const BatteryState& state() const {
+    return m_currentBatteryState;
+  }
+
+  bool setup() {
+    bool started = false;
+    int attempts = 0;
+
+    do {
+      started = m_batteryMonitor.begin();
+      delay(10);
+    } while (!started && attempts++ < 100);
+
+    if (!started)
+      return false;
+
+#ifndef HAS_MAX17048_MONITOR
+    m_batteryMonitor.setPackSize(LC709203F_APA_2000MAH);  // Change this depending on the battery size.
+#endif                                                    // HAS_MAX17048_MONITOR
+
+    // Setup battery queries each 10 seconds, but run it once initially.
+    queryBatteryState();
+    m_queryBatteryMonitorTimer.set(10000, &::queryBatteryState);
+
+    return true;
+  }
+
+  inline bool update() {
+    m_queryBatteryMonitorTimer.update();
+
+    // If there was an actual update, perform a notify.
+    if (m_hasUpdate) {
+      m_hasUpdate = false;
+      return true;
+    } else {
+      return false;
+    }
+  }
+};
+
+BatteryMonitor batteryMonitor;
+
+void queryBatteryState() {
+  batteryMonitor.m_currentBatteryState.voltage = batteryMonitor.m_batteryMonitor.cellVoltage();
+  batteryMonitor.m_currentBatteryState.percentage = batteryMonitor.m_batteryMonitor.cellPercent();
+  batteryMonitor.m_hasUpdate = true;
+
+#if WRITE_DEBUG_OUTPUT
+  Serial.print("Updated battery levels: ");
+  Serial.print(batteryMonitor.m_currentBatteryState.percentage, 1);
+  Serial.print("%, ");
+  Serial.print(batteryMonitor.m_currentBatteryState.voltage, 2);
+  Serial.print("V.");
+#endif  // WRITE_DEBUG_OUTPUT
+}
+#endif
+
+// ---------------------------------------------------------- Motor Controller -----------------------------------------------------------
 
 // Setup the global variables for vibration strength and duration
 int vibrationStrength[] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
@@ -57,6 +164,8 @@ Adafruit_PWMServoDriver motorController = Adafruit_PWMServoDriver(0x40, Wire);
 
 // Time stamp of last iteration.
 unsigned long lastTimeStamp = millis();
+
+// -------------------------------------------------------------- Functions ----------------------------------------------------------------
 
 #if USE_BINARY_INTERFACE
 void parseInput(uint32_t motorsInPackage, const uint32_t* inputBuffer) {
@@ -295,7 +404,7 @@ void setup() {
     Serial.flush();
 
 #if defined(HAS_BUILTIN_RGB_LED)
-  neopixelWrite(RGB_BUILTIN, 50, 0, 50);
+    neopixelWrite(RGB_BUILTIN, 50, 0, 50);
 #elif defined(HAS_COLORED_LEDS)
     digitalWrite(LEDR, LOW);
     digitalWrite(LEDG, HIGH);
@@ -311,6 +420,18 @@ void setup() {
   motorController.setOscillatorFrequency(motorControllerClock);
   motorController.setPWMFreq(motorControllerServoFrequency);
 
+  // Attempt to setup battery monitor.
+#if defined(PROVIDE_BATTERY_SERVICE)
+  bool batteryMonitorRunning = batteryMonitor.setup();
+
+  if (batteryMonitorRunning)
+    Serial.println("Battery monitor started.");
+  else
+    Serial.println("Unable to start battery monitor. Make sure a battery is connected and restart the device.");
+#else
+  bool batteryMonitorRunning = false;
+#endif  // PROVIDE_BATTERY_SERVICE
+
 #if USE_BLUETOOTH_LOW_ENERGY
   // Start Bluetooth service.
   if (!BLE.begin()) {
@@ -318,7 +439,7 @@ void setup() {
     Serial.flush();
 
 #if defined(HAS_BUILTIN_RGB_LED)
-  neopixelWrite(RGB_BUILTIN, 0, 0, 50);
+    neopixelWrite(RGB_BUILTIN, 0, 0, 50);
 #elif defined(HAS_COLORED_LEDS)
     digitalWrite(LEDR, HIGH);
     digitalWrite(LEDG, HIGH);
@@ -337,6 +458,13 @@ void setup() {
   hapticGloveService.addCharacteristic(hapticGloveRightHand);
   //hapticGloveService.addCharacteristic(hapticGloveLeftHand);
   BLE.addService(hapticGloveService);
+
+#if defined(PROVIDE_BATTERY_SERVICE)
+  if (batteryMonitorRunning) {
+    hapticGloveBatteryService.addCharacteristic(hapticGloveBatteryLevel);
+    BLE.addService(hapticGloveBatteryService);
+  }
+#endif  // PROVIDE_BATTERY_SERVICE
 
   // Setup advertisement.
   BLE.setAdvertisedService(hapticGloveService);
@@ -404,6 +532,17 @@ void loop() {
     if (vibrationDuration[i] > 0)
       vibrationDuration[i] -= deltaTime;
   }
+
+  // Query battery level.
+#if defined(PROVIDE_BATTERY_SERVICE)
+  if (batteryMonitor.update()) {
+    static uint8_t lastLevel = 0xFF; // Unreasonable that the monitor ever reports a value that high, so it's a good initialization value to ensure the value is written at least once.
+    uint8_t level = static_cast<uint8_t>(batteryMonitor.state().percentage);
+
+    if (level != lastLevel)
+      hapticGloveBatteryLevel.writeValue(level);
+  }
+#endif  // PROVIDE_BATTERY_SERVICE
 
   // Flush bus and delay for 10 ms.
 #if WRITE_DEBUG_OUTPUT

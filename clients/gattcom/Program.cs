@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Threading.Tasks;
 using InTheHand.Bluetooth;
 
@@ -64,6 +64,27 @@ try
     var service = await gloveDevice.Gatt.GetPrimaryServiceAsync(BluetoothUuid.FromGuid(new Guid("141806C2-081D-4197-FFFF-98D46AC994BE")));
     var characteristic = await service.GetCharacteristicAsync(BluetoothUuid.FromGuid(new Guid("141806C2-081D-4197-0001-98D46AC994BE")));
     Console.WriteLine(" Done.");
+
+    var batteryService = await gloveDevice.Gatt.GetPrimaryServiceAsync(BluetoothUuid.FromShortId(0x180F));
+
+    if (batteryService != null)
+    {
+        var batteryCharacteristic = await batteryService.GetCharacteristicAsync(BluetoothUuid.FromShortId(0x2A19));
+        batteryCharacteristic.CharacteristicValueChanged += (e, args) =>
+        {
+            var handler = new Action<string>(delegate (string message) { Console.WriteLine(message); });
+            handler.Invoke($"Battery level changed: {args.Value.First()}%.");
+        };
+        await batteryCharacteristic.StartNotificationsAsync();
+
+        Console.WriteLine("Connected to battery service.");
+        var charge = await batteryCharacteristic.ReadValueAsync();
+        Console.WriteLine($"Battery level changed: {charge.First()}%.");
+    }
+    else
+    {
+        Console.WriteLine("No battery service found.");
+    }
 
     var rng = new Random();
 
