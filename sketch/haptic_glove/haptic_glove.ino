@@ -537,7 +537,7 @@ void loop() {
 #if defined(PROVIDE_BATTERY_SERVICE)
   if (batteryMonitor.update()) {
     static uint8_t lastLevel = 0xFF;  // Unreasonable that the monitor ever reports a value that high, so it's a good initialization value to ensure the value is written at least once.
-    uint8_t level = static_cast<uint8_t>(batteryMonitor.state().percentage);
+    uint8_t level = constrain(static_cast<uint8_t>(batteryMonitor.state().percentage), 0, 100);
 
     if (level != lastLevel) {
       hapticGloveBatteryLevel.writeValue(level);
